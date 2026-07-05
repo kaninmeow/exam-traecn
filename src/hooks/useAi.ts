@@ -9,6 +9,8 @@ import {
   buildGenerateQuestionsPrompt,
   CHAT_SYSTEM_PROMPT,
   buildChatPrompt,
+  MIND_MAP_SYSTEM_PROMPT,
+  buildMindMapPrompt,
 } from '@/api/prompts';
 import type { ChatMessage } from '@/types/api';
 import { STORAGE_KEYS } from '@/constants';
@@ -52,6 +54,16 @@ export function useAi() {
     [callAi]
   );
 
+  const generateMindMap = useCallback(
+    async (pdfId: string) => {
+      const text = getFromStorage<string>(STORAGE_KEYS.PDF_TEXT + pdfId, '');
+      if (!text) return null;
+      const messages = buildMessages(MIND_MAP_SYSTEM_PROMPT, buildMindMapPrompt(text));
+      return callAi(messages);
+    },
+    [callAi]
+  );
+
   const generateQuestions = useCallback(
     async (pdfId: string, types: string[], count: number) => {
       const text = getFromStorage<string>(STORAGE_KEYS.PDF_TEXT + pdfId, '');
@@ -85,5 +97,5 @@ export function useAi() {
     [callAi]
   );
 
-  return { loading, error, generateSummary, generateQuestions, askQuestion, reExplain, callAi };
+  return { loading, error, generateSummary, generateMindMap, generateQuestions, askQuestion, reExplain, callAi };
 }

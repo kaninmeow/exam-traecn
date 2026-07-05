@@ -1,12 +1,12 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
-import { Sparkles, RefreshCw, BrainCircuit, BookOpen, Lightbulb, AlertTriangle, Network, FileText } from 'lucide-react';
+import { Sparkles, RefreshCw, BrainCircuit, BookOpen, Lightbulb, AlertTriangle, FileText } from 'lucide-react';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Tabs from '@/components/ui/Tabs';
 import Skeleton from '@/components/ui/Skeleton';
 import MarkdownViewer from '@/components/shared/MarkdownViewer';
-import LoadingSpinner from '@/components/shared/LoadingSpinner';
+import MindMap from '@/components/shared/MindMap';
 import { usePdfStore } from '@/stores/pdfStore';
 import { useAi } from '@/hooks/useAi';
 import type { AiSummary as AiSummaryType } from '@/types/pdf';
@@ -24,9 +24,10 @@ export default function AiSummary() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { pdfFiles, getSummary, saveSummary } = usePdfStore();
-  const { loading, error, generateSummary } = useAi();
+  const { loading, error, generateSummary, generateMindMap } = useAi();
   const [activeTab, setActiveTab] = useState('keyPoints');
   const [summary, setSummary] = useState<AiSummaryType | null>(null);
+  const [mindMapLoading, setMindMapLoading] = useState(false);
 
   const pdf = pdfFiles.find((f) => f.id === id);
 
@@ -42,39 +43,84 @@ export default function AiSummary() {
     const result = await generateSummary(id);
     if (!result) return;
 
-    const parseSection = (text: string, header: string): string[] => {
-      const regex = new RegExp(`## ${header}[\\s\\S]*?(?=## |$)`);
+    /** 提取 ## 标题下的原始 markdown 文本（去掉标题行本身） */
+    const extractSection = (text: string, header: string): string => {
+      // 匹配 ## 标题 到下一个 ## 标题或结尾
+      const regex = new RegExp(`##\\s*${header}[\\s\\S]*?(?=\\n##\\s|$)`);
       const match = text.match(regex);
-      if (!match) return [];
-      return match[0]
+      if (!match) return '';
+      return match[0].replace(new RegExp(`^##\\s*${header}\\s*`), '').trim();
+    };
+
+    const parseItems = (sectionMd: string): string[] => {
+      return sectionMd
         .split('\n')
-        .filter((line) => line.startsWith('- ') || line.startsWith('* '))
-        .map((line) => line.replace(/^[-*]\s*/, '').trim())
+        .filter((line) => line.match(/^\s*[-*]\s+/) || line.match(/^\s*\d+\.\s+/))
+        .map((line) => line.replace(/^\s*[-*\d.]\s+/, '').trim())
         .filter(Boolean);
     };
 
+    const rawKP = extractSection(result, '高频考点');
+    const rawKN = extractSection(result, '必背知识');
+    const rawCC = extractSection(result, '核心概念');
+    const rawEM = extractSection(result, '易错点');
+    const rawMM = extractSection(result, '思维导图');
+    const rawCS = extractSection(result, '章节总结');
+
+    const chapterMatch = result.match(/## 章节总结[\s\S]*/);
+    const chapterSummaries: { chapter: string; summary: string }[] = [];
+    if (chapterMatch) {
+      const chapters = chapterMatch[0].replace(/^## 章节总结\s*/, '').split(/###\s+/).filter(Boolean);
+      for (const ch of chapters) {
+        const lines = ch.split('\n').filter(Boolean);
+        chapterSummaries.push({
+          chapter: lines[0]?.trim() || '',
+          summary: lines.slice(1).join('\n').trim(),
+        });
+      }
+    }
+
     const newSummary: AiSummaryType = {
       pdfId: id,
-      keyPoints: parseSection(result, '高频考点'),
-      knowledgePoints: parseSection(result, '必背知识'),
-      coreConcepts: parseSection(result, '核心概念'),
-      easyMistakes: parseSection(result, '易错点'),
-      mindMap: result.match(/## 思维导图[\s\S]*?(?=## |$)/)?.[0]?.replace(/## 思维导图\s*/, '') || '',
-      chapterSummaries: [],
+      keyPoints: parseItems(rawKP),
+      knowledgePoints: parseItems(rawKN),
+      coreConcepts: parseItems(rawCC),
+      easyMistakes: parseItems(rawEM),
+      mindMap: rawMM,
+      chapterSummaries,
+      rawSections: {
+        keyPoints: rawKP,
+        knowledgePoints: rawKN,
+        coreConcepts: rawCC,
+        easyMistakes: rawEM,
+        mindMap: rawMM,
+        chapterSummaries: rawCS,
+      },
       generatedAt: Date.now(),
     };
 
-    const chapterMatch = result.match(/## 章节总结[\s\S]*/);
-    if (chapterMatch) {
-      const chapters = chapterMatch[0].split(/###\s+/).filter(Boolean);
-      newSummary.chapterSummaries = chapters.map((ch) => {
-        const lines = ch.split('\n').filter(Boolean);
-        return { chapter: lines[0]?.trim() || '', summary: lines.slice(1).join('\n').trim() };
-      });
-    }
-
     saveSummary(id, newSummary);
     setSummary(newSummary);
+  };
+
+  /** 单独重新生成思维导图 */
+  const handleRegenerateMindMap = async () => {
+    if (!id || !summary) return;
+    setMindMapLoading(true);
+    const result = await generateMindMap(id);
+    if (result) {
+      const updatedSummary = {
+        ...summary,
+        mindMap: result,
+        rawSections: {
+          ...summary.rawSections,
+          mindMap: result,
+        },
+      };
+      saveSummary(id, updatedSummary);
+      setSummary(updatedSummary);
+    }
+    setMindMapLoading(false);
   };
 
   if (!pdf) {
@@ -109,48 +155,61 @@ export default function AiSummary() {
       );
     }
 
+    const sectionIcons: Record<string, React.ReactNode> = {
+      keyPoints: <Sparkles size={14} className="text-amber-500 flex-shrink-0 mt-0.5" />,
+      knowledgePoints: <Lightbulb size={14} className="text-amber-500 flex-shrink-0 mt-0.5" />,
+      coreConcepts: <BookOpen size={14} className="text-blue-500 flex-shrink-0 mt-0.5" />,
+      easyMistakes: <AlertTriangle size={14} className="text-red-500 flex-shrink-0 mt-0.5" />,
+    };
+
+    /** 优先使用 rawSections 的原始 markdown 渲染，兼容旧数据回退到数组 */
+    const renderMarkdownSection = (key: keyof typeof sectionIcons) => {
+      const rawMd = summary.rawSections?.[key];
+      if (rawMd) {
+        return <MarkdownViewer content={rawMd} />;
+      }
+      // 兼容旧缓存数据（没有 rawSections 的情况）
+      const items = summary[key as keyof AiSummaryType] as string[];
+      if (!Array.isArray(items) || items.length === 0) {
+        return <p className="text-sm text-gray-400">暂无数据</p>;
+      }
+      return (
+        <ul className="space-y-2">
+          {items.map((item, i) => (
+            <li key={i} className="flex items-start gap-2 text-sm text-gray-700">
+              {sectionIcons[key]}
+              {item}
+            </li>
+          ))}
+        </ul>
+      );
+    };
+
     const contentMap: Record<string, React.ReactNode> = {
-      keyPoints: (
-        <ul className="space-y-2">
-          {summary.keyPoints.map((item, i) => (
-            <li key={i} className="flex items-start gap-2 text-sm text-gray-700">
-              <span className="w-5 h-5 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5">{i + 1}</span>
-              {item}
-            </li>
-          ))}
-        </ul>
+      keyPoints: renderMarkdownSection('keyPoints'),
+      knowledgePoints: renderMarkdownSection('knowledgePoints'),
+      coreConcepts: renderMarkdownSection('coreConcepts'),
+      easyMistakes: renderMarkdownSection('easyMistakes'),
+      mindMap: (
+        <div>
+          <div className="flex justify-end mb-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRegenerateMindMap}
+              disabled={mindMapLoading || loading}
+            >
+              <RefreshCw size={12} className={`mr-1 ${(mindMapLoading || loading) ? 'animate-spin' : ''}`} />
+              {mindMapLoading ? '生成中...' : '重新生成思维导图'}
+            </Button>
+          </div>
+          {mindMapLoading ? (
+            <Skeleton className="h-64" />
+          ) : (
+            <MindMap markdown={summary.rawSections?.mindMap || summary.mindMap || ''} />
+          )}
+        </div>
       ),
-      knowledgePoints: (
-        <ul className="space-y-2">
-          {summary.knowledgePoints.map((item, i) => (
-            <li key={i} className="flex items-start gap-2 text-sm text-gray-700">
-              <Lightbulb size={14} className="text-amber-500 flex-shrink-0 mt-0.5" />
-              {item}
-            </li>
-          ))}
-        </ul>
-      ),
-      coreConcepts: (
-        <ul className="space-y-2">
-          {summary.coreConcepts.map((item, i) => (
-            <li key={i} className="flex items-start gap-2 text-sm text-gray-700">
-              <BookOpen size={14} className="text-blue-500 flex-shrink-0 mt-0.5" />
-              {item}
-            </li>
-          ))}
-        </ul>
-      ),
-      easyMistakes: (
-        <ul className="space-y-2">
-          {summary.easyMistakes.map((item, i) => (
-            <li key={i} className="flex items-start gap-2 text-sm text-gray-700">
-              <AlertTriangle size={14} className="text-red-500 flex-shrink-0 mt-0.5" />
-              {item}
-            </li>
-          ))}
-        </ul>
-      ),
-      mindMap: <MarkdownViewer content={summary.mindMap || '暂无思维导图数据'} />,
       chapterSummaries: summary.chapterSummaries.length > 0 ? (
         <div className="space-y-4">
           {summary.chapterSummaries.map((ch, i) => (
@@ -160,7 +219,11 @@ export default function AiSummary() {
             </div>
           ))}
         </div>
-      ) : <p className="text-sm text-gray-400">暂无章节总结数据</p>,
+      ) : summary.rawSections?.chapterSummaries ? (
+        <MarkdownViewer content={summary.rawSections.chapterSummaries} />
+      ) : (
+        <p className="text-sm text-gray-400">暂无章节总结数据</p>
+      ),
     };
 
     return contentMap[activeTab] || null;

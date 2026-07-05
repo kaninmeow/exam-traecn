@@ -16,5 +16,14 @@ export interface AiSummary {
   easyMistakes: string[];
   mindMap: string;
   chapterSummaries: { chapter: string; summary: string }[];
+  /** 各板块原始 Markdown 内容，用于 MarkdownViewer 渲染 */
+  rawSections: {
+    keyPoints: string;
+    knowledgePoints: string;
+    coreConcepts: string;
+    easyMistakes: string;
+    mindMap: string;
+    chapterSummaries: string;
+  };
   generatedAt: number;
 }

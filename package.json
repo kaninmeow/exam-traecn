@@ -16,6 +16,10 @@
     "echarts": "^5.6.0",
     "echarts-for-react": "^3.0.2",
     "lucide-react": "^0.511.0",
+    "markmap-common": "^0.18.9",
+    "markmap-lib": "^0.18.9",
+    "markmap-view": "^0.18.9",
+    "d3": "^7.9.0",
     "pdfjs-dist": "^4.9.155",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -27,6 +31,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.25.0",
+    "@types/d3": "^7.4.3",
     "@types/node": "^22.15.30",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
